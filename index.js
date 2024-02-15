@@ -1,91 +1,85 @@
-// This will check if the node version you are running is the required
-// Node version, if it isn't it will throw the following error to inform
-// you.
-if (Number(process.version.slice(1).split(".")[0]) < 16) throw new Error("Node 16.x or higher is required. Update Node on your system.");
-require("dotenv").config();
+import os
+import discord
+from discord.ext import commands
+import asyncio
+import random
+from keep_alive import keep_alive
 
-// Load up the discord.js library
-const { Client, Collection } = require("discord.js");
-// We also load the rest of the things we need in this file:
-const { readdirSync } = require("fs");
-const { intents, partials, permLevels } = require("./config.js");
-const logger = require("./modules/logger.js");
-// This is your client. Some people call it `bot`, some people call it `self`,
-// some might call it `cootchie`. Either way, when you see `client.something`,
-// or `bot.something`, this is what we're referring to. Your client.
-const client = new Client({ intents, partials });
+keep_alive()
 
-// Aliases, commands and slash commands are put in collections where they can be
-// read from, catalogued, listed, etc.
-const commands = new Collection();
-const aliases = new Collection();
-const slashcmds = new Collection();
+intents = discord.Intents.default()
+intents.message_content = True
+intents.reactions = True
 
-// Generate a cache of client permissions for pretty perm names in commands.
-const levelCache = {};
-for (let i = 0; i < permLevels.length; i++) {
-  const thisLevel = permLevels[i];
-  levelCache[thisLevel.name] = thisLevel.level;
-}
+client = discord.Client(intents=intents)
+bot = commands.Bot(command_prefix='!', intents=intents)
 
-// To reduce client pollution we'll create a single container property
-// that we can attach everything we need to.
-client.container = {
-  commands,
-  aliases,
-  slashcmds,
-  levelCache
-};
+reacted_users = []  # Define reacted_users as a global variable
 
-// We're doing real fancy node 8 async/await stuff here, and to do that
-// we need to wrap stuff in an anonymous function. It's annoying but it works.
+@client.event
+async def on_ready():
+    print('We have logged in as {0.user}'.format(client))
 
-const init = async () => {
+@client.event
+async def on_message(message):
+    global reacted_users  # Reference the global variable
 
-  // Here we load **commands** into memory, as a collection, so they're accessible
-  // here and everywhere else.
-  const commands = readdirSync("./commands/").filter(file => file.endsWith(".js"));
-  for (const file of commands) {
-    const props = require(`./commands/${file}`);
-    logger.log(`Loading Command: ${props.help.name}. 👌`, "log");
-    client.container.commands.set(props.help.name, props);
-    props.conf.aliases.forEach(alias => {
-      client.container.aliases.set(alias, props.help.name);
-    });
-  }
+    if message.author == client.user:
+        return
 
-  // Now we load any **slash** commands you may have in the ./slash directory.
-  const slashFiles = readdirSync("./slash").filter(file => file.endsWith(".js"));
-  for (const file of slashFiles) {
-    const command = require(`./slash/${file}`);
-    const commandName = file.split(".")[0];
-    logger.log(`Loading Slash command: ${commandName}. 👌`, "log");
-    
-    // Now set the name of the command with it's properties.
-    client.container.slashcmds.set(command.commandData.name, command);
-  }
+    if message.content.startswith('$hello'):
+        await message.channel.send('Hello!')
 
-  // Then we load events, which will include our message and ready event.
-  const eventFiles = readdirSync("./events/").filter(file => file.endsWith(".js"));
-  for (const file of eventFiles) {
-    const eventName = file.split(".")[0];
-    logger.log(`Loading Event: ${eventName}. 👌`, "log");
-    const event = require(`./events/${file}`);
-    // Bind the client to any event, before the existing arguments
-    // provided by the discord.js event. 
-    // This line is awesome by the way. Just sayin'.
-    client.on(eventName, event.bind(null, client));
-  }  
+@bot.command()
+async def pacific(ctx):
+    global reacted_users  # Reference the global variable
 
-  // Threads are currently in BETA.
-  // This event will fire when a thread is created, if you want to expand
-  // the logic, throw this in it's own event file like the rest.
-  client.on("threadCreate", (thread) => thread.join());
+    # Send message asking for reactions
+    react_message = await ctx.send('@everyone react pentru pacific')
+    # Add verify reaction
+    await react_message.add_reaction('✅')
 
-  // Here we login the client.
-  client.login();
+    # Initialize reaction count
+    reaction_count = 0
+    reacted_users = []  # Reset the reacted_users list
+    while reaction_count < 21:
+        # Wait for reactions
+        reaction, user = await ctx.bot.wait_for('reaction_add')
+        # If the reaction is on the correct message
+        if reaction.message.id == react_message.id and str(reaction.emoji) == '✅':
+            reacted_users.append(user.name)
+            reaction_count += 1
+        # If someone reacts and they go over the limit, delete their reaction
+        if reaction_count >= 21:
+            await reaction.remove(user)
 
-// End top-level async/await function.
-};
+    # Create and send list of users who reacted
+    react_list = '\n'.join(reacted_users)
+    await ctx.send(f"List of users who reacted:\n{react_list}")
 
-init();
+@bot.command()
+async def choose(ctx):
+    global reacted_users  # Reference the global variable
+
+    if reacted_users:
+        chosen_users = random.sample(reacted_users, k=2)
+        await ctx.send(f"The chosen users are: {chosen_users[0]} and {chosen_users[1]}")
+    else:
+        await ctx.send("No users reacted to the message yet.")
+
+@client.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandNotFound):
+        await ctx.send("Invalid command.")
+
+try:
+    token = os.getenv("TOKEN") or ""
+    if token == "":
+        raise Exception("Please add your token to the Secrets pane.")
+    bot.run(token)
+except discord.HTTPException as e:
+    if e.status == 429:
+        print("The Discord servers denied the connection for making too many requests")
+        print("Get help from https://stackoverflow.com/questions/66724687/in-discord-py-how-to-solve-the-error-for-toomanyrequests")
+    else:
+        raise e
